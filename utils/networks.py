@@ -1,10 +1,9 @@
-import torch 
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Union
+from typing import Union, Optional
 
 class AtariDQNNetwork(nn.Module):
-    def __init__(self, input_shape:Union[tuple, list], num_actions):
+    def __init__(self, input_shape: Optional[Union[tuple, list]], num_actions):
         """
         input_shape: the shape of the input figure (C, H, W), usually (4, 84, 84)
         num_actions: Atari's action space is Discrete
@@ -15,3 +14,4 @@ class AtariDQNNetwork(nn.Module):
     def forward(self, x):
         # x: (batch, 4, 84, 84)
         # TODO: input is a batch of figure, do forward propogation to calculate the Q for each action
+        pass
