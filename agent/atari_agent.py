@@ -68,35 +68,19 @@ class AtariDQNAgent(AgentBase):
     
 
     def select_action(self, state:np.ndarray, deterministic=False) -> np.ndarray:
+       
+        # TODO: select actions 
+
+    def get_q(self, states:np.ndarray, actions:Union[np.ndarray, torch.Tensor]):
         """
         params: state: (batch, channel, 84,84)
         output: action: (batch, 1)
         """
-        state = atari_state_preprocess_function(self.observation_space, state)
-        state = to_correct_device_tensor(state, self.device)
-
-        all_q_values = self.network(state)
-        
-        if deterministic:
-            action = torch.argmax(all_q_values, dim=1,keepdim=True)
-        else:
-            action = torch.multinomial(torch.softmax(all_q_values, dim=1), num_samples=1)
-
-        return action.cpu().numpy()
-
-    def get_q(self, states:np.ndarray, actions:Union[np.ndarray, torch.Tensor]):
-        states = atari_state_preprocess_function(self.observation_space, states)
-        states, actions = to_correct_device_tensor(states, self.device) ,to_correct_device_tensor(actions, self.device, torch.long)
-        all_q_values = self.network(states)
-        q_values = all_q_values.gather(1, actions)
-        return q_values 
+        # TODO: compute Q(s,a)
 
     def get_max_q(self, states:np.ndarray):
-        states = atari_state_preprocess_function(self.observation_space, states)
-        states = to_correct_device_tensor(states, self.device)
-        all_q_values = self.network(states)
-        q_max = torch.max(all_q_values, dim=1, keepdim=True).values
-        return q_max 
+        # TODO: compute max_a Q(s,a) 
+        
         
 
 

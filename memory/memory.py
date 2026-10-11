@@ -44,6 +44,7 @@ class ReplayBuffer:
         
         self.rewards = np.zeros((buffer_size, self.num_envs), dtype=np.float32)
         self.dones = np.zeros((self.buffer_size, self.num_envs), dtype=np.float32)
+        # TODO: try to understand why there is no next_states buffer
         # since the replay buffer is a circular buffer, (pos+1)%self.buffer_size is the next_state, so we don't need to store next_state separately.
         # in fact, this may introduce one transition can't be used, so the real buffer size is buffer_size-1
         self.pos = 0
@@ -95,8 +96,8 @@ class ReplayBuffer:
     
     def _sample_from_indices(self, batch_indices: np.ndarray) -> dict[str, np.ndarray]:
         """Sample a batch of transitions from the replay buffer.
-        TODO: add more states preprocess to other environments 
         """
+        # TODO: Try to implement n-step sample
         env_indices = np.random.randint(0, high=self.num_envs, size=(len(batch_indices),))
         
         return dict(
@@ -110,6 +111,7 @@ class ReplayBuffer:
     def _get_indices(self, batch_size: int) -> np.ndarray:
         """Get a batch of indices to sample from the replay buffer.
         You may change this method to use prioritized experience replay or other sampling strategies."""
+        # TODO: Try to implement n-step sample
         if self.full:
             batch_indices = (np.random.randint(1, self.buffer_size, size=batch_size) + self.pos) % self.buffer_size
         else:

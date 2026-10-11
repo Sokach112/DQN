@@ -55,13 +55,10 @@ class DQN(OffPolicyAlgorithm):
         
     
     def _target_hard_update(self):
-        self.target_agent.load_state_dict(self.agent.state_dict())
+        # TODO: hard update 
     
     def _target_soft_update(self):
-        for target_param, param in zip(self.target_agent.parameters(), self.agent.parameters()):
-            target_param.data.copy_(
-                self.tau * param.data + (1 - self.tau) * target_param.data
-            )
+        # TODO: do soft update 
 
 
     def _update_buffer(self, batch):
@@ -69,40 +66,7 @@ class DQN(OffPolicyAlgorithm):
 
 
     def _update_policy(self):
-        self.agent.train()
-        with Result("train") as result:
-            batch = self.buffer.sample(self.batch_size)
-            states, actions, next_states, rewards, dones = batch['states'], batch['actions'], batch['next_states'], batch['rewards'], batch['dones']
-
-            # states = torch.from_numpy(states).float().to(self.device)
-            # actions = torch.from_numpy(actions).long().to(self.device)
-            # next_states = torch.from_numpy(next_states).float().to(self.device)
-            rewards = torch.from_numpy(rewards).float().to(self.device).unsqueeze(1)
-            dones = torch.from_numpy(dones).float().to(self.device).unsqueeze(1)
-
-            # calculate the DQN loss    
-            with torch.no_grad():
-                if self.use_target:
-                    target = rewards + (1 - dones) * self.gamma * self.target_agent.get_max_q(next_states)
-                else:
-                    target = rewards + (1 - dones) * self.gamma * self.agent.get_max_q(next_states)
-            q = self.agent.get_q(states, actions)
-            
-            td_error = target - q
-
-            loss = torch.mean(td_error**2)
-            
-            # do gradient update to the agent 
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-
-
-        if self.use_target:
-            if self.target_update_method == "soft":
-                self._target_soft_update()
-            elif self.interaction_step%self.target_update_interval==0:
-                self._target_hard_update()
+        # TODO: compute DQN loss according to paper 
 
 
         result.add_metric("network/loss", loss.item())
@@ -115,11 +79,7 @@ class DQN(OffPolicyAlgorithm):
 
     def random_choose_action(self):
         """You can use this function to implement epsilon-greedy exploration strategy"""
-        if self.epsilon_schedular=="linear":
-            self.epsilon = max(self.end_epsilon, self.start_epsilon - self.interaction_step / self.epsilon_timestep * (self.start_epsilon - self.end_epsilon))
-        else:
-            self.epsilon = self.start_epsilon
-        return np.random.rand() < self.epsilon
+        # TODO
 
     def interact_with_envs(self):
         batch, result = super().interact_with_envs()

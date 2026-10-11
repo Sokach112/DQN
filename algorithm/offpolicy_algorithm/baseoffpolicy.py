@@ -87,26 +87,14 @@ class OffPolicyAlgorithm(ABC):
         with Result("interact") as result:
             for step in range(interact_steps_per_env):
                 
-                if self.random_choose_action():
-                    actions = np.array([[self.training_envs.action_space.sample()] for _ in range(self.num_training_envs)],dtype=self.training_envs.action_space.dtype)
-                else:
-                    actions = self.agent.select_action(self.observations, self.train_action_deterministic)
-                
-                next_observations, rewards, terminateds, infos = self.training_envs.step(atari_to_useful_action(actions))
-                # self.envs_rewards+=rewards
+                # TODO interact with environment
 
-                batch['states'].append(self.observations)
-                batch['actions'].append(actions)
-                batch['rewards'].append(rewards)
-                batch['next_states'].append(next_observations)
-                batch['dones'].append(terminateds) 
                 for i in range(self.num_training_envs):
                     info = infos[i]
                     if "episode" in info:
                         self.episode_reward_buffer.append(info['episode']['r'])
                         # self.envs_rewards[i] = 0
-                self.observations = next_observations
-                self.interaction_step += self.num_training_envs
+                
         
         for k,v in batch.items():
             # if k=="infos":
@@ -143,7 +131,7 @@ class OffPolicyAlgorithm(ABC):
 
     def run(self):
         """
-        run the training loop of the algorithm
+        run the training loop of the algorithm, this is a typical procedure of offpolicy algorithm
         """
         
         self.initialize() # reset envs

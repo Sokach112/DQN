@@ -1,5 +1,5 @@
 env: 
-  name: BreakoutNoFrameskip-v4
+  name: PongNoFrameskip-v4
   num_training_envs: 1
   num_testing_envs: 4
   frame_stack: 4
