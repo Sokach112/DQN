@@ -3,7 +3,8 @@ from abc import ABC, abstractmethod
 import numpy as np
 from collections import deque
 import gymnasium as gym
-
+from typing import Dict, Any, cast
+from gymnasium.vector import VectorEnv
 
 from logger.logger import Logger
 from memory.memory import ReplayBuffer
@@ -14,11 +15,17 @@ from utils.utils import atari_to_useful_action
 
 
 class OffPolicyAlgorithm(ABC):
-
     """Base class for off-policy RL algorithms."""
 
-
-    def __init__(self, training_envs:gym.Env, testing_envs:gym.Env, buffer: ReplayBuffer, agent: AgentBase, logger: Logger, device,  save_pth: str, args):
+    def __init__(self, 
+                 training_envs: VectorEnv, 
+                 testing_envs: gym.Env, 
+                 buffer: ReplayBuffer, 
+                 agent: AtariDQNAgent, 
+                 logger: Logger, 
+                 device, 
+                 save_pth: str, 
+                 args):
         super(OffPolicyAlgorithm,self).__init__()
         self.training_envs = training_envs
         self.testing_envs = testing_envs
@@ -72,40 +79,70 @@ class OffPolicyAlgorithm(ABC):
         do gradient update to the policy with a batch of data sampled from replay buffer
         """
 
-    def random_choose_action():
+    def random_choose_action(self):
         """You can use this function to implement epsilon-greedy exploration strategy"""
         return False
 
-    
-
     def interact_with_envs(self):
         """
-        interact with the environments and collect data, then return the collected batch of data
+        Interact with the environments and collect data, then return the
+        collected batch of data.
         """
         interact_steps_per_env = self.interact_per_epoch
-        batch = dict(states=[], actions=[], rewards=[], next_states=[], dones=[]) 
-        with Result("interact") as result:
-            for step in range(interact_steps_per_env):
-                
-                # TODO interact with environment
 
+        # Explicit annotation so Pylance knows the values can become arrays
+        batch: Dict[str, Any] = dict(
+            states=[], actions=[], rewards=[], next_states=[], dones=[]
+        )
+
+        with Result("interact") as result:
+            for _ in range(interact_steps_per_env):
+                # --- 1. Select actions for all envs (vectorized) ---
+                actions = []
+                for i in range(self.num_training_envs):
+                    # Assume self.current_states[i] is the latest state for env i
+                    action = self.agent.select_action(
+                        self.current_states[i], deterministic=False
+                    )
+                    actions.append(action)
+
+                # --- 2. Step all envs simultaneously (vectorized API) ---
+                actions = np.array(actions)  # shape (num_envs,)
+                next_obs, rewards, terminated, truncated, infos = \
+                    self.training_envs.step(actions)
+                infos = cast(list[dict], infos)
+
+                # --- 3. Store transitions in the batch ---
+                for i in range(self.num_training_envs):
+                    done = terminated or truncated
+                    batch["states"].append(self.current_states[i])
+                    batch["actions"].append(actions[i])
+                    batch["rewards"].append(rewards[i])
+                    batch["next_states"].append(next_obs[i])
+                    batch["dones"].append(done)
+
+                # --- 4. Handle episode terminations ---
                 for i in range(self.num_training_envs):
                     info = infos[i]
                     if "episode" in info:
-                        self.episode_reward_buffer.append(info['episode']['r'])
-                        # self.envs_rewards[i] = 0
-                
-        
-        for k,v in batch.items():
-            # if k=="infos":
-            #     continue
-            batch[k] = np.stack(v,axis=0)
+                        self.episode_reward_buffer.append(info["episode"]["r"])
 
-        if len(self.episode_reward_buffer)>0:
-            result.add_metric("reward_mean",np.mean(self.episode_reward_buffer))
-            result.add_metric("reward_std",np.std(self.episode_reward_buffer))
+                # --- 5. Reset terminated envs and update current states ---
+                # For a vectorized env, gymnasium usually auto-resets terminated
+                # sub-envs if you wrap it with `gym.vector.SyncVectorEnv`. If not,
+                # you'll need to manually reset them here.
+                self.current_states = next_obs
+
+            # Convert lists to numpy arrays
+            for k, v in batch.items():
+                batch[k] = np.stack(v, axis=0)
+
+        if len(self.episode_reward_buffer) > 0:
+            result.add_metric("reward_mean", np.mean(self.episode_reward_buffer))
+            result.add_metric("reward_std", np.std(self.episode_reward_buffer))
+
         return batch, result
-           
+
     def test_condition(self):
         """
         check if it's time to test the policy
