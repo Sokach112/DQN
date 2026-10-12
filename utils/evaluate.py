@@ -1,39 +1,32 @@
+"""Deterministic evaluation on complete, unclipped Atari episodes."""
+import numpy as np
 from utils.result import Result
-import torch
-import numpy as np 
-from omegaconf import DictConfig
-
-from agent.atari_agent import AgentBase
-from .utils import atari_to_useful_action
 from env.make_envs import make_vec_envs
 
-def evaluate_atari(agent:AgentBase, test_episodes:int, env_args:DictConfig):
-    """
-    Evaluate the policy in the given environments.
-    
-    Args:
-        agent: The RL agent to be evaluated.
-        envs: Vec environments to evaluate on.
-        test_episodes: Number of episodes to run for each environment.
-    """
-    envs = make_vec_envs(env_args,False,scale=False)
-    agent.eval()
-    states = envs.reset()
-    episode_rewards = []
-    with Result(head="test") as result:
-        while len(episode_rewards)<test_episodes:
-            with torch.no_grad():
-                actions = agent.select_action(states,deterministic=True) # test with deterministic policy
-            next_states, rewards, terminateds, infos = envs.step(atari_to_useful_action(actions))
-            
-            for i in range(envs.num_envs):
-                if 'episode' in infos[i]:
-                    episode_rewards.append(infos[i]['episode']['r'])
-            states = next_states
 
-    result.add_metric("episode_rewards_mean", np.mean(episode_rewards))
-    result.add_metric("episode_rewards_std", np.std(episode_rewards))
-    envs.close()
-    return result
-        
-    
+def evaluate_atari(agent, test_episodes, env_args, seed=0):
+    """Evaluate exactly ``test_episodes`` games and restore the agent's mode.
+
+    Evaluation environments are always closed, including on policy errors.
+    """
+    if test_episodes <= 0:
+        raise ValueError("test_episodes must be positive")
+    envs = make_vec_envs(env_args, False, scale=False, seed=seed)
+    was_training = agent.training
+    rewards = []
+    try:
+        agent.eval()
+        states = envs.reset()
+        with Result('evaluation') as result:
+            while len(rewards) < test_episodes:
+                actions = agent.select_action(states, deterministic=True)
+                states, _, _, infos = envs.step(actions)
+                for info in infos:
+                    if 'episode' in info and len(rewards) < test_episodes:
+                        rewards.append(info['episode']['r'])
+        result.add_metric('episode_rewards_mean', np.mean(rewards))
+        result.add_metric('episode_rewards_std', np.std(rewards))
+        return result
+    finally:
+        agent.train(was_training)
+        envs.close()

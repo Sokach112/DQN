@@ -7,13 +7,14 @@ env:
 algorithm:
   name: DQN
   buffer_name: ReplayBuffer
-  buffer_size: 1000000
+  buffer_size: 10000  # ~565 MB for two uint8 observation arrays
   learning_rate: 1e-4
   gamma: 0.99
   optimizer: Adam
   start_epsilon: 1
   end_epsilon: 0.1
-  epsilon_schedular: linear
+  epsilon_schedule: linear
+  learning_starts: 5000
   epsilon_timestep: 1000000
   use_target: true
   target_update_method: hard
@@ -32,14 +33,14 @@ reward_buffer_size: 20
 total_epoch: 5000000 
 interact_per_epoch: 4
 test_episodes: 10
-train_action_deterministic: true
+train_action_deterministic: false
 
 
 experiment_name: ${env.name}-${algorithm.name}
-log_dir: outputs/${experiment_name}//${now:%Y-%m-%d_%H-%M-%S}
+log_dir: outputs/${experiment_name}/${now:%Y-%m-%d_%H-%M-%S}
 
 hydra:
   run:
-    dir: outputs/${experiment_name}//${now:%Y-%m-%d_%H-%M-%S}
+    dir: outputs/${experiment_name}/${now:%Y-%m-%d_%H-%M-%S}
 
 hydra_base_dir: ""

@@ -1,3 +1,5 @@
+"""Double DQN updates, target synchronization, and exploration scheduling."""
+
 from .baseoffpolicy import OffPolicyAlgorithm
 from memory.memory import ReplayBuffer
 import torch
@@ -27,6 +29,7 @@ class DQN(OffPolicyAlgorithm):
     def __init__(self, training_envs, testing_envs, buffer: ReplayBuffer,
                  agent: AtariDQNAgent, logger: Logger, device, save_pth: str,
                  args, target_agent=None):
+        """Initialize the component and retain its configuration."""
         super(DQN, self).__init__(
             training_envs, testing_envs, buffer, agent, logger,
             device, save_pth, args)
@@ -40,11 +43,17 @@ class DQN(OffPolicyAlgorithm):
         self.epsilon = algo_args.start_epsilon
         self.end_epsilon = algo_args.end_epsilon
         self.epsilon_timestep = algo_args.epsilon_timestep
-        self.epsilon_schedular = algo_args.epsilon_schedular
+        self.epsilon_schedular = algo_args.get('epsilon_schedule', algo_args.get('epsilon_schedular', 'linear'))
+        if self.epsilon_schedular not in ('linear', 'constant'):
+            raise ValueError('epsilon_schedule must be linear or constant')
+        if self.epsilon_timestep <= 0:
+            raise ValueError('epsilon_timestep must be positive')
         self.use_target = algo_args.use_target
         self.batch_size = algo_args.batch_size
         self.device = device
 
+        if self.use_target and target_agent is None:
+            raise ValueError('use_target requires target_agent')
         if self.use_target and target_agent is not None:
             self.target_agent = target_agent.to(self.device)
             self._target_hard_update()
@@ -52,6 +61,8 @@ class DQN(OffPolicyAlgorithm):
         self.target_update_method = algo_args.target_update_method
         self.target_update_interval = algo_args.target_update_interval
         self.tau = algo_args.target_update_tau
+        if self.target_update_method not in ("hard", "soft") or self.target_update_interval <= 0 or not 0 <= self.tau <= 1:
+            raise ValueError("Invalid target update configuration")
 
         self.optimizer: torch.optim.Optimizer = \
             OPTIMIZER_DICT[algo_args.optimizer](
@@ -81,9 +92,11 @@ class DQN(OffPolicyAlgorithm):
     # ------------------------------------------------------------------
 
     def _update_buffer(self, batch):
+        """Append the collected time-major transitions to replay."""
         self.buffer.add(batch)
 
     def interact_with_envs(self):
+        """Collect vector steps and report rollout metrics including epsilon."""
         batch, result = super().interact_with_envs()
         result.add_metric("epsilon", self.epsilon)
         return batch, result
@@ -103,24 +116,13 @@ class DQN(OffPolicyAlgorithm):
         # ------------------------------------------------------------------
         # 1. Sample a minibatch from the replay buffer
         # ------------------------------------------------------------------
-        # Assumes buffer.sample(batch_size) returns a tuple of tensors:
-        #   states, actions, rewards, next_states, dones
-        # with shapes:
-        #   states:      (B, 4, 84, 84)
-        #   actions:     (B,) or (B, 1)
-        #   rewards:     (B,) or (B, 1)
-        #   next_states: (B, 4, 84, 84)
-        #   dones:       (B,) or (B, 1) — 1 if terminal, 0 otherwise
-        states, actions, rewards, next_states, dones = \
-            self.buffer.sample(self.batch_size)
-
-
-        # Convert to tensors first, THEN move to device
-        states = torch.from_numpy(states).to(self.device, dtype=torch.float32)
-        next_states = torch.from_numpy(next_states).to(self.device, dtype=torch.float32)
-        actions = torch.from_numpy(actions).to(self.device, dtype=torch.long)
-        rewards = torch.from_numpy(rewards).to(self.device, dtype=torch.float32)
-        dones = torch.from_numpy(dones).to(self.device, dtype=torch.float32)
+        # Replay returns a dictionary; scalar targets must be column vectors.
+        batch = self.buffer.sample(self.batch_size)
+        states = batch['states']
+        next_states = batch['next_states']
+        actions = torch.as_tensor(batch['actions'], device=self.device, dtype=torch.long)
+        rewards = torch.as_tensor(batch['rewards'], device=self.device).reshape(-1, 1)
+        dones = torch.as_tensor(batch['dones'], device=self.device).reshape(-1, 1)
 
         # ------------------------------------------------------------------
         # 2. Compute Q(s, a) for the current states and actions
@@ -135,9 +137,9 @@ class DQN(OffPolicyAlgorithm):
                 # ---- Double DQN target ----
                 # Selection: online network  θ
                 # Evaluation: target network θ⁻
-                next_q_online = self.agent.network(next_states)       # (B, A)
+                next_q_online = self.agent.q_values(next_states)       # (B, A)
                 best_actions = next_q_online.argmax(dim=1, keepdim=True)
-                next_q_target = self.target_agent.network(
+                next_q_target = self.target_agent.q_values(
                     next_states)  # (B, A)
                 next_q = next_q_target.gather(1, best_actions)         # (B, 1)
             else:
@@ -166,6 +168,7 @@ class DQN(OffPolicyAlgorithm):
         # ------------------------------------------------------------------
         # 6. Periodically update the target network
         # ------------------------------------------------------------------
+        self.gradient_step += 1
         if self.use_target:
             if self.target_update_method == "hard":
                 if self.gradient_step % self.target_update_interval == 0:
@@ -182,7 +185,6 @@ class DQN(OffPolicyAlgorithm):
         result.add_metric("q_value_mean", q.mean().item())
         result.add_metric("target_mean", target.mean().item())
 
-        self.gradient_step += 1
         return result
 
     # ------------------------------------------------------------------
@@ -194,7 +196,12 @@ class DQN(OffPolicyAlgorithm):
         Epsilon-greedy exploration helper.
 
         Returns True if we should take a random action this step.
-        The caller is expected to update self.epsilon according to
-        self.epsilon_schedular.
+        The rollout updates epsilon after each vector step.
         """
         return np.random.random() < self.epsilon
+
+    def update_epsilon(self):
+        """Anneal exploration by total collected transitions, clamped at the end."""
+        fraction = min(1.0, self.interaction_step / self.epsilon_timestep)
+        self.epsilon = (self.start_epsilon + fraction * (self.end_epsilon - self.start_epsilon)
+                        if self.epsilon_schedular == 'linear' else self.start_epsilon)

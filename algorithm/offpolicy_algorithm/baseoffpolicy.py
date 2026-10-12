@@ -1,10 +1,11 @@
+"""SB3 vector-environment collection and off-policy training lifecycle."""
+
 from tqdm import tqdm
 from abc import ABC, abstractmethod
 import numpy as np
 from collections import deque
 import gymnasium as gym
-from typing import Dict, Any, cast
-from gymnasium.vector import VectorEnv
+from stable_baselines3.common.vec_env import VecEnv
 
 from logger.logger import Logger
 from memory.memory import ReplayBuffer
@@ -16,15 +17,16 @@ from utils.result import Result
 class OffPolicyAlgorithm(ABC):
     """Base class for off-policy RL algorithms."""
 
-    def __init__(self, 
-                 training_envs: VectorEnv, 
-                 testing_envs: gym.Env, 
-                 buffer: ReplayBuffer, 
-                 agent: AtariDQNAgent, 
-                 logger: Logger, 
-                 device, 
-                 save_pth: str, 
+    def __init__(self,
+                 training_envs: VecEnv,
+                 testing_envs: VecEnv | None,
+                 buffer: ReplayBuffer,
+                 agent: AtariDQNAgent,
+                 logger: Logger,
+                 device,
+                 save_pth: str,
                  args):
+        """Initialize the component and retain its configuration."""
         super(OffPolicyAlgorithm,self).__init__()
         self.training_envs = training_envs
         self.testing_envs = testing_envs
@@ -32,14 +34,17 @@ class OffPolicyAlgorithm(ABC):
         self.agent = agent.to(device)
         self.device = device
         self.logger = logger
-        
+
 
 
         self.interaction_step = 0
         self.gradient_step = 0
 
         self.total_epoch = args.total_epoch
-        self.num_training_envs = args.env.num_training_envs
+        self.num_training_envs = training_envs.num_envs
+        self.epsilon = 0.0
+        if args.interact_per_epoch <= 0:
+            raise ValueError("interact_per_epoch must be positive")
         self.num_testing_envs = args.env.num_testing_envs
         self.test_interval = args.test_interval
         self.interact_per_epoch = args.interact_per_epoch
@@ -47,31 +52,34 @@ class OffPolicyAlgorithm(ABC):
         self.train_action_deterministic = args.train_action_deterministic
         self.save_interval = args.save_interval
         self.train_log_interval = args.train_log_interval
-        
+
         self.save_pth = save_pth
         self.args = args
         self.episode_reward_buffer = deque(maxlen=args.reward_buffer_size)
         self.envs_rewards = np.zeros((self.num_training_envs,))
 
-    
-    
-    def update(self, batch, start_train)-> Result:
+
+
+    def update(self, batch, start_train=None)-> Result:
+        """Store collected transitions and optionally perform one policy update."""
         with Result("buffer") as result:
             self._update_buffer(batch)
+        if start_train is None:
+            start_train = self.start_train()
         if start_train:
             update_policy_log = self._update_policy()
             result.add(update_policy_log)
             return result
         return result
-        
-    
+
+
     @abstractmethod
     def _update_buffer(self, batch):
         """
         update the replay buffer with given selected batch of data
         :param batch: the batch of data
         """
-    
+
     @abstractmethod
     def _update_policy(self):
         """
@@ -87,105 +95,89 @@ class OffPolicyAlgorithm(ABC):
         Interact with the environments and collect data, then return the
         collected batch of data.
         """
-        interact_steps_per_env = self.interact_per_epoch
-
-        # Explicit annotation so Pylance knows the values can become arrays
-        batch: Dict[str, Any] = dict(
-            states=[], actions=[], rewards=[], next_states=[], dones=[]
-        )
-
+        batch = {key: [] for key in ('states', 'actions', 'rewards', 'next_states', 'dones')}
         with Result("interact") as result:
-            for _ in range(interact_steps_per_env):
-                # --- 1. Select actions for all envs (vectorized) ---
-                actions = []
-                for i in range(self.num_training_envs):
-                    # Assume self.current_states[i] is the latest state for env i
-                    action = self.agent.select_action(
-                        self.current_states[i], deterministic=False
-                    )
-                    actions.append(action)
-
-                # --- 2. Step all envs simultaneously (vectorized API) ---
-                actions = np.array(actions)  # shape (num_envs,)
-                next_obs, rewards, terminated, truncated, infos = \
-                    self.training_envs.step(actions)
-                infos = cast(list[dict], infos)
-
-                # --- 3. Store transitions in the batch ---
-                for i in range(self.num_training_envs):
-                    done = terminated or truncated
-                    batch["states"].append(self.current_states[i])
-                    batch["actions"].append(actions[i])
-                    batch["rewards"].append(rewards[i])
-                    batch["next_states"].append(next_obs[i])
-                    batch["dones"].append(done)
-
-                # --- 4. Handle episode terminations ---
-                for i in range(self.num_training_envs):
-                    info = infos[i]
-                    if "episode" in info:
-                        self.episode_reward_buffer.append(info["episode"]["r"])
-
-                # --- 5. Reset terminated envs and update current states ---
-                # For a vectorized env, gymnasium usually auto-resets terminated
-                # sub-envs if you wrap it with `gym.vector.SyncVectorEnv`. If not,
-                # you'll need to manually reset them here.
+            for _ in range(self.interact_per_epoch):
+                self.agent.epsilon = self.epsilon
+                actions = self.agent.select_action(
+                    self.current_states, deterministic=self.train_action_deterministic)
+                next_obs, rewards, dones, infos = self.training_envs.step(actions)
+                successors = next_obs.copy()
+                terminals = dones.copy()
+                for i, info in enumerate(infos):
+                    if dones[i]:
+                        successors[i] = info['terminal_observation']
+                        terminals[i] = not info.get('TimeLimit.truncated', False)
+                    if 'episode' in info:
+                        self.episode_reward_buffer.append(info['episode']['r'])
+                for key, value in zip(batch, (self.current_states, actions, rewards, successors, terminals)):
+                    batch[key].append(value.copy())
                 self.current_states = next_obs
-
-            # Convert lists to numpy arrays
-            for k, v in batch.items():
-                batch[k] = np.stack(v, axis=0)
-
-        if len(self.episode_reward_buffer) > 0:
-            result.add_metric("reward_mean", np.mean(self.episode_reward_buffer))
-            result.add_metric("reward_std", np.std(self.episode_reward_buffer))
-
+                self.interaction_step += self.num_training_envs
+                self.update_epsilon()
+        batch = {key: np.stack(value) for key, value in batch.items()}
+        if self.episode_reward_buffer:
+            result.add_metric('reward_mean', np.mean(self.episode_reward_buffer))
+            result.add_metric('reward_std', np.std(self.episode_reward_buffer))
         return batch, result
+
+    def update_epsilon(self):
+        """Hook for algorithms that schedule exploration after interaction."""
+
+    def _interval_due(self, interval, name):
+        """Trigger once when a counter crosses an interval boundary; zero disables."""
+        if interval <= 0:
+            return False
+        bucket = self.interaction_step // interval
+        previous = getattr(self, name, 0)
+        setattr(self, name, bucket)
+        return bucket > previous
 
     def test_condition(self):
         """
         check if it's time to test the policy
         """
-        return self.interaction_step % self.test_interval == 0
+        return self._interval_due(self.test_interval, '_last_test')
 
     def save_condition(self):
-        """check if it's time to save the checkpoint"""
-        if self.interaction_step % self.save_interval == 0:
-            return True 
-        return False
+        """Return whether a checkpoint interval has elapsed."""
+        return self._interval_due(self.save_interval, '_last_save')
 
     def initialize(self):
-        self.observations = self.training_envs.reset()
-    
+        """Reset training environments and retain their batched observations."""
+        self.current_states = self.training_envs.reset()
+
     def train_log_condition(self):
-        if self.interaction_step%self.train_log_interval==0:
-            return True 
-        return False
+        """Return whether a logging interval has elapsed."""
+        return self._interval_due(self.train_log_interval, '_last_log')
 
     def start_train(self):
-        return self.interaction_step>=5000
+        """Wait for warmup and enough replay transitions for a minibatch."""
+        return self.interaction_step >= self.args.algorithm.get('learning_starts', 5000) and len(self.buffer) >= self.batch_size
 
     def run(self):
         """
         run the training loop of the algorithm, this is a typical procedure of offpolicy algorithm
         """
-        
+
         self.initialize() # reset envs
         for epoch in tqdm(range(self.total_epoch), desc="Epoch", unit="epoch"):
-            if self.test_condition():
-                test_result = evaluate_atari(self.agent, self.test_episodes,self.args.env)
-                self.logger.log_test(epoch, self.interaction_step, self.gradient_step, test_result)
-            
             collected_batch, interact_result = self.interact_with_envs()
-            train_result = self.update(collected_batch, self.start_train())
+            train_result = self.update(collected_batch)
             if self.train_log_condition():
                 train_result.add(interact_result)
                 self.logger.log_train(epoch, self.interaction_step, self.gradient_step, train_result)
-                
-            
+
+
+            if self.test_condition():
+                test_result = evaluate_atari(self.agent, self.test_episodes,self.args.env, seed=self.args.seed)
+                self.logger.log_test(epoch, self.interaction_step, self.gradient_step, test_result)
+
             if self.save_condition():
                 self.agent.save(self.save_pth)
 
 
 
 
+
+        self.agent.save(self.save_pth)

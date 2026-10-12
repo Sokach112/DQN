@@ -1,4 +1,4 @@
-from .dqn import DQN 
+from .dqn import DQN
 from .baseoffpolicy import OffPolicyAlgorithm
 ALGORITHM_DICT = {
     "OffPolicy": OffPolicyAlgorithm,

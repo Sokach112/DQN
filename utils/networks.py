@@ -1,3 +1,5 @@
+"""Convolutional Q network for normalized channel-first Atari observations."""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -60,6 +62,7 @@ class AtariDQNNetwork(nn.Module):
     def forward(self, x):
         # x: (batch, 4, 84, 84)
         # --- Convolutional stack ---
+        """Map normalized (batch, channels, height, width) tensors to Q-values."""
         x = F.relu(self.conv1(x))  # (B, 32, 20, 20)
         x = F.relu(self.conv2(x))  # (B, 64, 9, 9)
         x = F.relu(self.conv3(x))  # (B, 64, 7, 7)

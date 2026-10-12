@@ -1,6 +1,8 @@
+"""Vector-step replay storage and uniformly sampled transition dictionaries."""
+
 
 import numpy as np
-import gymnasium as gym 
+import gymnasium as gym
 from utils.utils import atari_state_preprocess_function
 
 def get_action_dim(action_space: gym.spaces.Space) -> int:
@@ -17,110 +19,75 @@ def get_action_dim(action_space: gym.spaces.Space) -> int:
         return 1
     elif isinstance(action_space, gym.spaces.MultiDiscrete):
         # Number of discrete actions
-        return len(action_space.nvec)
+        return int(action_space.nvec.size)
     elif isinstance(action_space, gym.spaces.MultiBinary):
         # Number of binary actions
-        return action_space.n
+        return int(np.prod(action_space.shape))
     else:
         raise NotImplementedError(f"{action_space} action space is not supported")
 
 
 class ReplayBuffer:
-    """Replay buffer used to store and sample transitions when training an off-policy model.
-    Here we use the implementation of memory efficient replay buffer."""
-    def __init__(self,observation_space: gym.spaces.Box,
-                 action_space: gym.spaces.Space,
-                 buffer_size: int,
-                 num_envs: int):
-        
-        self.buffer_size = buffer_size//num_envs
-        self.action_dim = get_action_dim(action_space)
+    """Circular replay storing explicit successors, including terminal observations.
+
+    Capacity is measured in transitions and rounded down to whole vector steps.
+    Batches have leading dimensions (time, environments).
+    """
+
+    def __init__(self, observation_space, action_space, buffer_size, num_envs):
+        """Allocate storage for at most ``buffer_size`` transitions."""
+        if num_envs <= 0 or buffer_size < num_envs:
+            raise ValueError("buffer_size must be at least num_envs > 0")
+        self.buffer_size = buffer_size // num_envs
         self.num_envs = num_envs
-
-        self.observation_space = observation_space 
+        self.action_dim = get_action_dim(action_space)
+        self.observation_space = observation_space
         self.action_space = action_space
-        self.states = np.zeros((buffer_size, self.num_envs, *observation_space.shape), dtype=observation_space.dtype) #TODO : check the type of observation space, if it's not gym.spaces.Box, it may raise an error.
-        self.actions = np.zeros((buffer_size, self.num_envs, self.action_dim), dtype=action_space.dtype)
-        
-        self.rewards = np.zeros((buffer_size, self.num_envs), dtype=np.float32)
-        self.dones = np.zeros((self.buffer_size, self.num_envs), dtype=np.float32)
-        # TODO: try to understand why there is no next_states buffer
-        # since the replay buffer is a circular buffer, (pos+1)%self.buffer_size is the next_state, so we don't need to store next_state separately.
-        # in fact, this may introduce one transition can't be used, so the real buffer size is buffer_size-1
+        shape = (self.buffer_size, num_envs)
+        self.states = np.empty((*shape, *observation_space.shape), dtype=observation_space.dtype)
+        self.next_states = np.empty_like(self.states)
+        self.actions = np.empty((*shape, self.action_dim), dtype=action_space.dtype)
+        self.rewards = np.empty(shape, dtype=np.float32)
+        self.dones = np.empty(shape, dtype=np.float32)
         self.pos = 0
-        self.full = False 
+        self.full = False
 
+    def __len__(self):
+        """Return the number of sampleable transitions."""
+        return (self.buffer_size if self.full else self.pos) * self.num_envs
 
-    def add(self,batch: dict[str, np.ndarray]):
-        """Add a batch of transitions to the replay buffer."""
-        
-        assert "states" in batch and "actions" in batch and "rewards" in batch and "next_states" in batch and "dones" in batch, "Batch must contain states, actions, rewards, next_states and dones."
-        # unpack the batch
-        s, a , ns, r, d = batch['states'], batch['actions'], batch['next_states'], batch['rewards'], batch['dones']
+    def add(self, batch):
+        """Copy a time-major batch, retaining the newest data on overflow."""
+        count = len(batch['states'])
+        arrays = {}
+        for key in ('states', 'next_states', 'actions', 'rewards', 'dones'):
+            storage = getattr(self, key)
+            value = np.asarray(batch[key])
+            if key == 'actions' and value.shape == (count, self.num_envs):
+                value = value[..., None]
+            if value.shape != (count, *storage.shape[1:]):
+                raise ValueError(f"Invalid {key} shape: {value.shape}")
+            arrays[key] = value
+        for i in range(count):
+            for key, value in arrays.items():
+                getattr(self, key)[self.pos] = value[i]
+            self.pos += 1
+            if self.pos == self.buffer_size:
+                self.full = True
+                self.pos = 0
 
-        batch_size,num_envs = s.shape[0],s.shape[1]   # the first dimension is the batch size, the second dimension is the number of envs
-        
-        assert batch_size>=0, "Batch size must be non-negative."
-        
-        end = self.pos + batch_size
+    def _get_indices(self, batch_size):
+        """Draw occupied time indices uniformly with replacement."""
+        if batch_size <= 0 or not len(self):
+            raise ValueError("Sampling requires a positive batch size and nonempty buffer")
+        return np.random.randint(self.buffer_size if self.full else self.pos, size=batch_size)
 
-        if end <= self.buffer_size:
-            # not crossing the boundary
-            self.states[self.pos:end] = s
-            self.actions[self.pos:end] = a
-            self.rewards[self.pos:end] = r
-            self.dones[self.pos:end] = d
-        else:
-            # crossing the boundary, we need to split the batch into two parts
-            first_part = self.buffer_size - self.pos
-            second_part = batch_size - first_part
+    def _sample_from_indices(self, batch_indices):
+        """Pair time indices with random environments and return copied arrays."""
+        env_indices = np.random.randint(self.num_envs, size=len(batch_indices))
+        return {key: getattr(self, key)[batch_indices, env_indices]
+                for key in ('states', 'actions', 'rewards', 'next_states', 'dones')}
 
-            self.states[self.pos:] = s[:first_part]
-            self.states[:second_part] = s[first_part:]
-
-            self.actions[self.pos:] = a[:first_part]
-            self.actions[:second_part] = a[first_part:]
-
-            self.rewards[self.pos:] = r[:first_part]
-            self.rewards[:second_part] = r[first_part:]
-
-            self.dones[self.pos:] = d[:first_part]
-            self.dones[:second_part] = d[first_part:]
-
-            self.full = True
-        if end>=self.buffer_size:
-            self.full = True
-        self.pos = end % self.buffer_size
-        
-        self.states[self.pos] = ns[-1] # set the next state of the last transition in the batch to the current position, so that we can get the next state when sampling.
-    
-    def _sample_from_indices(self, batch_indices: np.ndarray) -> dict[str, np.ndarray]:
-        """Sample a batch of transitions from the replay buffer.
-        """
-        # TODO: Try to implement n-step sample
-        env_indices = np.random.randint(0, high=self.num_envs, size=(len(batch_indices),))
-        
-        return dict(
-            states=self.states[batch_indices, env_indices, :],
-            actions=self.actions[batch_indices, env_indices, :],
-            next_states=self.states[(batch_indices + 1) % self.buffer_size, env_indices, :], # get the next state by adding 1 to the index, and taking modulo buffer size to handle the circular buffer.
-            rewards=self.rewards[batch_indices, env_indices],
-            dones=self.dones[batch_indices, env_indices],
-        )
-
-    def _get_indices(self, batch_size: int) -> np.ndarray:
-        """Get a batch of indices to sample from the replay buffer.
-        You may change this method to use prioritized experience replay or other sampling strategies."""
-        # TODO: Try to implement n-step sample
-        if self.full:
-            batch_indices = (np.random.randint(1, self.buffer_size, size=batch_size) + self.pos) % self.buffer_size
-        else:
-            batch_indices = np.random.randint(0, self.pos, size=batch_size)
-        
-        return batch_indices
-
-    def sample(self, batch_size: int) -> dict[str, np.ndarray]:
-        """Sample a batch of transitions from the replay buffer."""
-        
-        batch_indices = self._get_indices(batch_size)
-        return self._sample_from_indices(batch_indices)
+    def sample(self, batch_size):
+        """Return a dictionary of transitions sampled with replacement."""
+        return self._sample_from_indices(self._get_indices(batch_size))

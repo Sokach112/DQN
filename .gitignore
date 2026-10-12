@@ -10,7 +10,6 @@
 # Virtual environments
 # =========================
 venv/
-env/
 .venv/
 conda-env/
 
