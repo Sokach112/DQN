@@ -124,3 +124,63 @@ Tests use synthetic image environments and do not require ROMs, GPU access, or
 online logging accounts. They cover replay overflow and successors, vector
 collection, truncation masks, TD updates, target-copy timing, normalization,
 exploration shape, checkpoint loading, evaluation cleanup, metrics, and wrappers.
+
+## Diagnosing flat Atari scores
+
+A low TD loss and increasing update count do not establish policy improvement.
+Before another long run, inspect an existing trusted checkpoint:
+
+```bash
+python diagnose.py --checkpoint /path/to/newest_model.pth --steps 2000 \
+  --device auto --output diagnostic_report.json
+```
+
+This runs bounded random and greedy rollouts without training. The JSON records
+completed game scores, action frequencies, observation range/dtype, frame changes,
+Q-value variability, and the gap between the two highest Q-values. It also records
+source/checkpoint hashes for identifying the code and model being inspected. Omit
+`--checkpoint` for an untrained control. The environment comes from the local
+`config/config.yaml`; it must match the checkpoint's game. A rollout may finish
+before an episode, producing an empty score list; that is not a zero score.
+
+One dominant action may explain poor play but does not establish the cause.
+Changing images and finite Q-values likewise do not establish successful learning.
+`tests/test_learning.py` checks exact Double DQN targets and basic visual learning;
+it is explicitly not a Pong convergence benchmark.
+
+### Checkpoint destination in Colab
+
+The optional Hydra override `+save_pth=/content/drive/MyDrive/dqn_checkpoints/`
+now selects a checkpoint directory; `newest_model.pth` is appended. An explicit
+filename such as `+save_pth=/content/drive/MyDrive/dqn_checkpoints/pong.pth` is
+also accepted. The resolved destination is printed at startup. Without this
+override, checkpoints remain under `log_dir`.
+
+Earlier versions silently ignored the added `save_pth` field. For those runs,
+look for `outputs/**/newest_model.pth` under the Colab project directory before
+ending the runtime. With the default save interval, the first periodic save is
+at 500,000 transitions, and a final save occurs on successful training completion.
+Loading weights is separate: passing `save_pth` never resumes a training run.
+
+### Visual-feature collapse and activation choice
+
+A failed Pong checkpoint inspected on 2026-10-12 chose action 3 on every one of
+5,000 greedy steps. Its third convolution's ReLU output was all zeros across
+128 sampled game observations. Backpropagation on those observations produced
+zero gradients in all three convolutional weight tensors. Thus the downstream
+layers could fit constant values without responding to the ball or paddle.
+This identifies the checkpoint's failure mechanism, not when or why it began.
+
+New training runs now default to `algorithm.activation=leaky_relu` (negative slope
+0.01); `algorithm.activation=relu` remains available for controlled comparisons.
+LeakyReLU retains a nonzero derivative for negative inputs. On the failed weights,
+a local activation-only probe restored nonzero gradients to all three convolutions.
+That is a gradient-flow safeguard, not a validated Pong performance improvement.
+
+Activation choice is saved in checkpoint metadata. Legacy checkpoints without
+this field load with ReLU, preserving their original policy even when the current
+training default is LeakyReLU. Loading does not silently repair or convert them.
+Training also logs `network/encoder_gradient_norm` (after gradient clipping) and
+`td_error_abs`. A persistently zero encoder gradient warrants an activation audit.
+The checkpoint diagnostic now includes per-layer activation sparsity, variation
+across game observations, and a gradient probe that does not update model weights.

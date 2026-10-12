@@ -6,6 +6,7 @@ env:
 
 algorithm:
   name: DQN
+  activation: leaky_relu  # retain gradients when convolution preactivations are negative
   buffer_name: ReplayBuffer
   buffer_size: 10000  # ~565 MB for two uint8 observation arrays
   learning_rate: 1e-4

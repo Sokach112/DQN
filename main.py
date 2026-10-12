@@ -1,6 +1,7 @@
 """Training entry point: configuration, seeding, resources, and algorithm assembly."""
 
 import os
+from pathlib import Path
 import logging
 logging.basicConfig(
     level=logging.INFO,
@@ -29,10 +30,27 @@ def get_args(cfg: DictConfig):
     print("Parameters:", OmegaConf.to_yaml(cfg, resolve=True))
     return cfg
 
+def resolve_checkpoint_path(args: DictConfig) -> Path:
+    """Resolve optional save_pth as a file or directory, otherwise use log_dir.
+
+    Existing directories, trailing separators, and suffixless paths are treated
+    as directories and receive newest_model.pth. No checkpoint is loaded here.
+    """
+    configured = args.get("save_pth")
+    if not configured:
+        return (Path(args.log_dir).expanduser() / "newest_model.pth").resolve()
+    path = Path(str(configured)).expanduser()
+    if path.is_dir() or str(configured).endswith(("/", "\\")) or not path.suffix:
+        path = path / "newest_model.pth"
+    return path.resolve()
+
+
 @hydra.main(config_path="config", config_name="config",version_base="1.3")
 def main(cfg: DictConfig):
     """Build the training components and release environments and loggers on exit."""
     args = get_args(cfg)
+    checkpoint_path = resolve_checkpoint_path(args)
+    logging.info("Checkpoint destination: %s", checkpoint_path)
     set_seed(args.seed)
 
     training_envs = make_vec_envs(args.env,True,scale=False,seed=args.seed)
@@ -51,8 +69,8 @@ def main(cfg: DictConfig):
         buffer = BUFFER_DICT[args.algorithm.buffer_name](training_envs.observation_space, training_envs.action_space, args.algorithm.buffer_size, training_envs.num_envs)
 
         logging.info("Creating the Agent...")
-        agent = AtariDQNAgent(training_envs.observation_space, training_envs.action_space, device)
-        target_agent = AtariDQNAgent(training_envs.observation_space, training_envs.action_space, device) if args.algorithm.use_target else None
+        agent = AtariDQNAgent(training_envs.observation_space, training_envs.action_space, device, activation=args.algorithm.get("activation", "relu"))
+        target_agent = AtariDQNAgent(training_envs.observation_space, training_envs.action_space, device, activation=args.algorithm.get("activation", "relu")) if args.algorithm.use_target else None
 
 
         # create trainer
@@ -61,7 +79,7 @@ def main(cfg: DictConfig):
         algorithm = ALGORITHM_DICT[args.algorithm.name](training_envs=training_envs, testing_envs=None,
                                                    buffer=buffer, agent=agent,
                                                    logger=logger, device=device,
-                                                   save_pth=os.path.join(args.log_dir, "newest_model.pth"),
+                                                   save_pth=str(checkpoint_path),
                                                    args=args,target_agent=target_agent)
 
         logging.info("Begin Training...")

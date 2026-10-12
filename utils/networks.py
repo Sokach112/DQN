@@ -7,12 +7,14 @@ from typing import Union, Optional
 
 
 class AtariDQNNetwork(nn.Module):
-    def __init__(self, input_shape: Union[tuple, list], num_actions: int):
+    def __init__(self, input_shape: Union[tuple, list], num_actions: int, activation="relu"):
         """
         input_shape: the shape of the input figure (C, H, W), usually (4, 84, 84)
         num_actions: Atari's action space is Discrete
         """
         super(AtariDQNNetwork, self).__init__()
+
+        self.set_activation(activation)
 
         # Unpack input shape
         in_channels, in_height, in_width = input_shape
@@ -47,9 +49,9 @@ class AtariDQNNetwork(nn.Module):
         # Do a dummy forward pass with a zero tensor of the input shape.
         with torch.no_grad():
             dummy = torch.zeros(1, in_channels, in_height, in_width)
-            dummy = F.relu(self.conv1(dummy))
-            dummy = F.relu(self.conv2(dummy))
-            dummy = F.relu(self.conv3(dummy))
+            dummy = self.activation(self.conv1(dummy))
+            dummy = self.activation(self.conv2(dummy))
+            dummy = self.activation(self.conv3(dummy))
             self._flat_features = dummy.view(1, -1).shape[1]
 
         # --- Fully-connected layers ---
@@ -59,19 +61,31 @@ class AtariDQNNetwork(nn.Module):
         # Output layer: one Q-value per action
         self.fc2 = nn.Linear(512, num_actions)
 
+    def set_activation(self, name):
+        """Select the hidden activation without changing parameter names/shapes.
+
+        ReLU preserves legacy checkpoints; LeakyReLU retains a gradient for
+        negative preactivations to reduce the risk of a dead visual pathway.
+        """
+        if name not in ("relu", "leaky_relu"):
+            raise ValueError("activation must be relu or leaky_relu")
+        self.activation_name = name
+        self.activation = (nn.ReLU() if name == "relu"
+                           else nn.LeakyReLU(negative_slope=0.01))
+
     def forward(self, x):
         # x: (batch, 4, 84, 84)
         # --- Convolutional stack ---
         """Map normalized (batch, channels, height, width) tensors to Q-values."""
-        x = F.relu(self.conv1(x))  # (B, 32, 20, 20)
-        x = F.relu(self.conv2(x))  # (B, 64, 9, 9)
-        x = F.relu(self.conv3(x))  # (B, 64, 7, 7)
+        x = self.activation(self.conv1(x))  # (B, 32, 20, 20)
+        x = self.activation(self.conv2(x))  # (B, 64, 9, 9)
+        x = self.activation(self.conv3(x))  # (B, 64, 7, 7)
 
         # Flatten: (B, 64, 7, 7) → (B, 64*7*7) = (B, 3136)
         x = x.view(x.size(0), -1)
 
         # --- Fully-connected stack ---
-        x = F.relu(self.fc1(x))    # (B, 512)
+        x = self.activation(self.fc1(x))    # (B, 512)
         x = self.fc2(x)            # (B, num_actions)
 
         return x

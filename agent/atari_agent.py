@@ -57,13 +57,17 @@ class AgentBase(nn.Module, ABC):
         pth_file = torch.load(path, map_location=self.device, weights_only=False)
         self.load_state_dict(pth_file['state_dict'])
         data = pth_file['data']
+        self._restore_metadata(data)
+        self.to(self.device)
+
+    def _restore_metadata(self, data):
+        """Restore checkpoint space metadata while retaining the current device."""
         self.observation_space = data['observation_space']
         self.action_space = data['action_space']
-        self.to(self.device)
 
 
 class AtariDQNAgent(AgentBase):
-    def __init__(self, observation_space: Space, action_space: Space, device):
+    def __init__(self, observation_space: Space, action_space: Space, device, activation="relu"):
         """Initialize the component and retain its configuration."""
         super(AtariDQNAgent, self).__init__(
             observation_space, action_space, device)
@@ -73,9 +77,20 @@ class AtariDQNAgent(AgentBase):
         self.observation_shape = observation_space.shape
 
         self.network = AtariDQNNetwork(
-            observation_space.shape, self.num_actions)  # type: ignore
+            observation_space.shape, self.num_actions, activation=activation)  # type: ignore
         self.to(device)
         self.epsilon = 0.0
+
+    def _get_other_parameters(self):
+        """Include activation semantics so checkpoints reproduce their policy."""
+        data = super()._get_other_parameters()
+        data['activation'] = self.network.activation_name
+        return data
+
+    def _restore_metadata(self, data):
+        """Use ReLU for legacy checkpoints that predate activation metadata."""
+        super()._restore_metadata(data)
+        self.network.set_activation(data.get('activation', 'relu'))
 
     def q_values(self, states):
         """Return (batch, actions) Q-values, normalizing byte pixels once.

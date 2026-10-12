@@ -163,6 +163,11 @@ class DQN(OffPolicyAlgorithm):
         loss.backward()
         # Gradient clipping is standard for DQN and helps stability
         torch.nn.utils.clip_grad_norm_(self.agent.parameters(), max_norm=10.0)
+        encoder_grad_norm = torch.stack([
+            layer.weight.grad.detach().norm()
+            for layer in (self.agent.network.conv1, self.agent.network.conv2, self.agent.network.conv3)
+            if layer.weight.grad is not None
+        ]) if self.agent.network.conv1.weight.grad is not None else torch.zeros(1, device=self.device)
         self.optimizer.step()
 
         # ------------------------------------------------------------------
@@ -182,6 +187,8 @@ class DQN(OffPolicyAlgorithm):
         result = Result("")
         result.add_metric("network/loss", loss.item())
         result.add_metric("td_error", td_error.mean().item())
+        result.add_metric("td_error_abs", td_error.abs().mean().item())
+        result.add_metric("network/encoder_gradient_norm", encoder_grad_norm.norm().item())
         result.add_metric("q_value_mean", q.mean().item())
         result.add_metric("target_mean", target.mean().item())
 
