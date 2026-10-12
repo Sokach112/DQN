@@ -9,9 +9,8 @@ from gymnasium.vector import VectorEnv
 from logger.logger import Logger
 from memory.memory import ReplayBuffer
 from utils.evaluate import evaluate_atari
-from agent.atari_agent import AgentBase, AtariDQNAgent
+from agent.atari_agent import AtariDQNAgent
 from utils.result import Result
-from utils.utils import atari_to_useful_action
 
 
 class OffPolicyAlgorithm(ABC):

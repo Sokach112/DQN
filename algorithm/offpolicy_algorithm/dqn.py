@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from utils.result import Result
 from logger.logger import Logger
-from agent.atari_agent import AgentBase, AtariDQNAgent
+from agent.atari_agent import AtariDQNAgent
 
 
 OPTIMIZER_DICT = {
