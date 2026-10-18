@@ -13,7 +13,6 @@ import numpy as np
 from collections import deque
 from typing import Any, SupportsFloat, cast
 from omegaconf import DictConfig
-import os
 
 ATARI_ENVS = [
     'BreakoutNoFrameskip-v4',
@@ -49,7 +48,6 @@ def _parse_reset_result(reset_result: tuple) -> tuple[tuple, dict, bool]:
     return reset_result, {}, contains_info
 
 def get_space_dtype(obs_space: gym.spaces.Box) -> type[np.floating] | type[np.integer]:
-
     """Return the numeric dtype family for a Box observation space."""
     obs_space_dtype: type[np.integer] | type[np.floating]
     if np.issubdtype(obs_space.dtype, np.integer):
@@ -64,8 +62,9 @@ def get_space_dtype(obs_space: gym.spaces.Box) -> type[np.floating] | type[np.in
     return obs_space_dtype
 
 class ScaledFloatFrame(gym.ObservationWrapper):
-    """Normalize observations to 0~1.
-
+    """
+    Normalize observations to 0~1.
+    
     :param gym.Env env: the environment to wrap.
     """
 
@@ -113,7 +112,7 @@ class FrameStack(gym.Wrapper):
             low=np.min(obs_space.low),
             high=np.max(obs_space.high),
             shape=shape,
-            dtype=obs_space_dtype,
+            dtype=obs_space_dtype, # pyright: ignore[reportArgumentType]
         )
 
     def reset(self, **kwargs: Any) -> tuple[np.ndarray, dict]:
@@ -131,7 +130,6 @@ class FrameStack(gym.Wrapper):
 
     def _get_ob(self) -> np.ndarray:
         # frames is a list of four (channels,84,84) arrays, we need to convert to (self.n_frames*channels,84,84)
-        # TODO: consider other condition
         """Concatenate the stored channel-first frames along the channel axis."""
         return np.concatenate(self.frames, axis=0)
 

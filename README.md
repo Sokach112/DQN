@@ -184,3 +184,61 @@ Training also logs `network/encoder_gradient_norm` (after gradient clipping) and
 `td_error_abs`. A persistently zero encoder gradient warrants an activation audit.
 The checkpoint diagnostic now includes per-layer activation sparsity, variation
 across game observations, and a gradient probe that does not update model weights.
+
+## Controlled learner comparison
+
+`compare_dqn.py` isolates the custom update from collection/preprocessing:
+
+```bash
+python compare_dqn.py --mode parity
+python compare_dqn.py --mode train --backend both --steps 25000 --episodes 3
+python compare_dqn.py --mode native --steps 25000 --episodes 3
+```
+
+All commands default to CPU, one PyTorch thread, seed 0, 50,000 replay transitions,
+LeakyReLU, and the same initial weights. Outputs go to `outputs/comparison`.
+Use a different `--output` directory to retain independent experiments. Existing
+reports/checkpoints in the chosen directory are replaced. Atari ROMs are required.
+
+- **Parity:** identical real minibatches through the production custom update and
+  the installed SB3 `DQN.train`; compare predictions, losses, and weights over
+  50 updates, including five target copies.
+- **Train:** independent rollouts with a shared collector and replay contract.
+  This intentionally isolates learner differences; it cannot independently test
+  the project's collection/replay implementation.
+- **Native:** SB3's own collector and replay on the project's environment wrappers.
+  The network/initial weights/Adam options are matched. SB3 retains uniform random
+  warmup, begins updating at 10,004 rather than 10,000 transitions, and copies its
+  target at environment-step boundaries. These small differences are recorded in
+  the report; this control is not claimed to be numerically identical.
+
+The comparison uses **vanilla target-network DQN** for both implementations,
+selected by the new `algorithm.double_dqn=false` option. The normal training
+configuration keeps `double_dqn=true`. Setting `use_target=false` is not an
+appropriate substitute: that removes the target network entirely.
+
+The budget controls total transitions, not epochs. Warmup is 10,000 transitions,
+epsilon decays from 1 to .1 over 400,000 transitions, and training uses one update
+per four transitions. Final evaluation uses separately seeded complete games and
+preserves the training NumPy/Torch CPU RNG states. Three evaluation games and a
+single seed are a bounded diagnostic, not a convergence or reliability benchmark.
+SB3-native checkpoints retain their usual `.zip` format; shared-run custom
+checkpoints use `.pth`.
+
+Audit a trusted checkpoint's image sensitivity without training:
+
+```bash
+python checkpoint_sensitivity.py --checkpoint /path/to/newest_model.pth
+```
+
+This saves a 256-image regional-occlusion/frame-order report and a sample frame
+stack. Regional removal creates synthetic inputs; a changed action does not
+establish correct tracking, and unchanged actions do not prove the region is
+ignored. The reported centered Q-values remove the per-state mean to distinguish
+changes in overall predictions from changes in relative action preferences.
+
+`python compare_wrappers.py` independently compares 2,000 identical actions with
+stock SB3 AtariWrapper/VecTransposeImage/VecFrameStack. Its report excludes reset
+padding and does not exercise the project's 5,000-decision time-limit boundary.
+This verifies normal rollout preprocessing without claiming equivalence for all
+termination cases.

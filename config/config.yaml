@@ -18,6 +18,7 @@ algorithm:
   learning_starts: 5000
   epsilon_timestep: 1000000
   use_target: true
+  double_dqn: true  # false selects vanilla DQN with the target network
   target_update_method: hard
   target_update_interval: 10000
   target_update_tau: 0.005

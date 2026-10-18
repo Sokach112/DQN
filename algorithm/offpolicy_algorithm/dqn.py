@@ -49,6 +49,7 @@ class DQN(OffPolicyAlgorithm):
         if self.epsilon_timestep <= 0:
             raise ValueError('epsilon_timestep must be positive')
         self.use_target = algo_args.use_target
+        self.double_dqn = algo_args.get("double_dqn", True)
         self.batch_size = algo_args.batch_size
         self.device = device
 
@@ -134,14 +135,12 @@ class DQN(OffPolicyAlgorithm):
         # ------------------------------------------------------------------
         with torch.no_grad():
             if self.use_target:
-                # ---- Double DQN target ----
-                # Selection: online network  θ
-                # Evaluation: target network θ⁻
-                next_q_online = self.agent.q_values(next_states)       # (B, A)
-                best_actions = next_q_online.argmax(dim=1, keepdim=True)
-                next_q_target = self.target_agent.q_values(
-                    next_states)  # (B, A)
-                next_q = next_q_target.gather(1, best_actions)         # (B, 1)
+                if self.double_dqn:
+                    next_q_online = self.agent.q_values(next_states)
+                    best_actions = next_q_online.argmax(dim=1, keepdim=True)
+                    next_q = self.target_agent.q_values(next_states).gather(1, best_actions)
+                else:
+                    next_q = self.target_agent.get_max_q(next_states)
             else:
                 # ---- Standard DQN target ----
                 next_q = self.agent.get_max_q(next_states)             # (B, 1)
