@@ -32,6 +32,10 @@ checkpoints/
 *.pt
 *.ckpt
 
+# keep curated report evidence (training log + solved checkpoint)
+!reports/evidence/**/*.log
+!reports/evidence/**/*.pth
+
 # =========================
 # Dataset
 # =========================

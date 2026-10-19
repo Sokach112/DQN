@@ -1,0 +1,40 @@
+{
+  "checkpoints": [
+    "best_model.pth",
+    "newest_model.pth"
+  ],
+  "episodes_per_seed": 20,
+  "seeds": [
+    555,
+    777
+  ],
+  "device": "mps",
+  "results": {
+    "best_model.pth": {
+      "555": {
+        "evaluation/time": 67.47292691700022,
+        "episode_rewards_mean": 1.4,
+        "episode_rewards_std": 8.398809439438425
+      },
+      "777": {
+        "evaluation/time": 58.02654483399965,
+        "episode_rewards_mean": 7.15,
+        "episode_rewards_std": 8.001718565408309
+      },
+      "mean_of_seed_means": 4.275
+    },
+    "newest_model.pth": {
+      "555": {
+        "evaluation/time": 58.68991079099942,
+        "episode_rewards_mean": -0.05,
+        "episode_rewards_std": 9.825858741097392
+      },
+      "777": {
+        "evaluation/time": 59.960438707999856,
+        "episode_rewards_mean": 5.55,
+        "episode_rewards_std": 7.952829685086938
+      },
+      "mean_of_seed_means": 2.75
+    }
+  }
+}

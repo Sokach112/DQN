@@ -7,13 +7,17 @@ from typing import Union, Optional
 
 
 class AtariDQNNetwork(nn.Module):
-    def __init__(self, input_shape: Union[tuple, list], num_actions: int, activation="relu"):
+    def __init__(self, input_shape: Union[tuple, list], num_actions: int, activation="relu", architecture="nature2015"):
         """
         input_shape: the shape of the input figure (C, H, W), usually (4, 84, 84)
         num_actions: Atari's action space is Discrete
         """
         super(AtariDQNNetwork, self).__init__()
 
+        if architecture not in ("nature2015", "paper2013"):
+            raise ValueError("Unknown architecture")
+        self.architecture = architecture
+        paper = architecture == "paper2013"
         self.set_activation(activation)
 
         # Unpack input shape
@@ -23,15 +27,15 @@ class AtariDQNNetwork(nn.Module):
         # Layer 1: 32 filters, 8x8 kernel, stride 4
         self.conv1 = nn.Conv2d(
             in_channels=in_channels,
-            out_channels=32,
+            out_channels=16 if paper else 32,
             kernel_size=8,
             stride=4,
         )
 
         # Layer 2: 64 filters, 4x4 kernel, stride 2
         self.conv2 = nn.Conv2d(
-            in_channels=32,
-            out_channels=64,
+            in_channels=16 if paper else 32,
+            out_channels=32 if paper else 64,
             kernel_size=4,
             stride=2,
         )
@@ -44,6 +48,9 @@ class AtariDQNNetwork(nn.Module):
             stride=1,
         )
 
+        if paper:
+            self.conv3 = nn.Identity()
+
         # --- Compute the flattened size after convolutions ---
         # We need this to size the first fully-connected layer.
         # Do a dummy forward pass with a zero tensor of the input shape.
@@ -51,15 +58,16 @@ class AtariDQNNetwork(nn.Module):
             dummy = torch.zeros(1, in_channels, in_height, in_width)
             dummy = self.activation(self.conv1(dummy))
             dummy = self.activation(self.conv2(dummy))
-            dummy = self.activation(self.conv3(dummy))
+            if not paper:
+                dummy = self.activation(self.conv3(dummy))
             self._flat_features = dummy.view(1, -1).shape[1]
 
         # --- Fully-connected layers ---
         # Hidden layer: 512 units
-        self.fc1 = nn.Linear(self._flat_features, 512)
+        self.fc1 = nn.Linear(self._flat_features, 256 if paper else 512)
 
         # Output layer: one Q-value per action
-        self.fc2 = nn.Linear(512, num_actions)
+        self.fc2 = nn.Linear(256 if paper else 512, num_actions)
 
     def set_activation(self, name):
         """Select the hidden activation without changing parameter names/shapes.
@@ -79,7 +87,8 @@ class AtariDQNNetwork(nn.Module):
         """Map normalized (batch, channels, height, width) tensors to Q-values."""
         x = self.activation(self.conv1(x))  # (B, 32, 20, 20)
         x = self.activation(self.conv2(x))  # (B, 64, 9, 9)
-        x = self.activation(self.conv3(x))  # (B, 64, 7, 7)
+        if self.architecture != "paper2013":
+            x = self.activation(self.conv3(x))
 
         # Flatten: (B, 64, 7, 7) → (B, 64*7*7) = (B, 3136)
         x = x.view(x.size(0), -1)

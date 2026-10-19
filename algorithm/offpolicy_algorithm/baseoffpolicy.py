@@ -57,6 +57,10 @@ class OffPolicyAlgorithm(ABC):
         self.args = args
         self.episode_reward_buffer = deque(maxlen=args.reward_buffer_size)
         self.envs_rewards = np.zeros((self.num_training_envs,))
+        # Subclasses may skip expensive per-update scalar extraction when the
+        # result will not be logged. Direct calls to _update_policy keep metrics
+        # by default, so tests and one-off diagnostics are unchanged.
+        self._collect_update_metrics = True
 
 
 
@@ -163,8 +167,12 @@ class OffPolicyAlgorithm(ABC):
         self.initialize() # reset envs
         for epoch in tqdm(range(self.total_epoch), desc="Epoch", unit="epoch"):
             collected_batch, interact_result = self.interact_with_envs()
+            # Decide logging before the update so costly device synchronizations
+            # for scalar metrics happen only on logging boundaries.
+            log_this_update = self.train_log_condition()
+            self._collect_update_metrics = log_this_update
             train_result = self.update(collected_batch)
-            if self.train_log_condition():
+            if log_this_update:
                 train_result.add(interact_result)
                 self.logger.log_train(epoch, self.interaction_step, self.gradient_step, train_result)
 

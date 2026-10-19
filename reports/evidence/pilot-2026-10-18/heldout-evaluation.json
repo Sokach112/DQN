@@ -1,0 +1,50 @@
+{
+  "baseline": {
+    "100": {
+      "evaluation/time": 5.128996540999651,
+      "episode_rewards_mean": -21.0,
+      "episode_rewards_std": 0.0
+    },
+    "200": {
+      "evaluation/time": 5.184236417000648,
+      "episode_rewards_mean": -21.0,
+      "episode_rewards_std": 0.0
+    }
+  },
+  "learning_rate": {
+    "100": {
+      "evaluation/time": 5.469351665999966,
+      "episode_rewards_mean": -20.9,
+      "episode_rewards_std": 0.3
+    },
+    "200": {
+      "evaluation/time": 5.4445663750002495,
+      "episode_rewards_mean": -20.6,
+      "episode_rewards_std": 0.4898979485566356
+    }
+  },
+  "exploration": {
+    "100": {
+      "evaluation/time": 5.873850707999736,
+      "episode_rewards_mean": -19.6,
+      "episode_rewards_std": 0.4898979485566356
+    },
+    "200": {
+      "evaluation/time": 5.7249625419999575,
+      "episode_rewards_mean": -19.9,
+      "episode_rewards_std": 0.3
+    }
+  },
+  "breakout": {
+    "100": {
+      "evaluation/time": 36.527548832999855,
+      "episode_rewards_mean": 0.0,
+      "episode_rewards_std": 0.0
+    },
+    "200": {
+      "evaluation/time": 36.55515333299991,
+      "episode_rewards_mean": 0.0,
+      "episode_rewards_std": 0.0
+    }
+  }
+}

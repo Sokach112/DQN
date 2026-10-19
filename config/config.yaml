@@ -6,19 +6,23 @@ env:
 
 algorithm:
   name: DQN
-  activation: leaky_relu  # retain gradients when convolution preactivations are negative
+  architecture: paper2013
+  activation: relu
+  loss: mse
   buffer_name: ReplayBuffer
   buffer_size: 10000  # ~565 MB for two uint8 observation arrays
   learning_rate: 1e-4
   gamma: 0.99
   optimizer: Adam
+  action_selection: epsilon_greedy  # epsilon_greedy (assignment baseline) or softmax
+  softmax_temperature: 1.0  # alpha in pi(a|s) ∝ exp(Q(s,a)/alpha); softmax mode only
   start_epsilon: 1
   end_epsilon: 0.1
   epsilon_schedule: linear
   learning_starts: 5000
   epsilon_timestep: 1000000
   use_target: true
-  double_dqn: true  # false selects vanilla DQN with the target network
+  double_dqn: false  # assignment baseline
   target_update_method: hard
   target_update_interval: 10000
   target_update_tau: 0.005

@@ -37,6 +37,9 @@ class DQN(OffPolicyAlgorithm):
         algo_args = args.algorithm
         assert algo_args.name == "DQN", \
             "The method name in args must be 'DQN' for DQN algorithm."
+        self.loss_name = algo_args.get("loss", "huber")
+        if self.loss_name not in LOSS_DICT:
+            raise ValueError("loss must be mse or huber")
         self.lr = algo_args.learning_rate
         self.gamma = algo_args.gamma
         self.start_epsilon = algo_args.start_epsilon
@@ -52,6 +55,12 @@ class DQN(OffPolicyAlgorithm):
         self.double_dqn = algo_args.get("double_dqn", True)
         self.batch_size = algo_args.batch_size
         self.device = device
+        # Optional Boltzmann exploration is opt-in; epsilon-greedy remains the
+        # default assignment baseline. See AtariDQNAgent.configure_exploration.
+        self.agent.configure_exploration(
+            algo_args.get("action_selection", "epsilon_greedy"),
+            algo_args.get("softmax_temperature", 1.0),
+        )
 
         if self.use_target and target_agent is None:
             raise ValueError('use_target requires target_agent')
@@ -153,7 +162,7 @@ class DQN(OffPolicyAlgorithm):
         # ------------------------------------------------------------------
         # The paper uses the Huber loss (smooth L1) for robustness.
         td_error = target - q                                          # (B, 1)
-        loss = F.smooth_l1_loss(q, target)
+        loss = LOSS_DICT[self.loss_name](q, target)
 
         # ------------------------------------------------------------------
         # 5. Gradient step
@@ -162,11 +171,13 @@ class DQN(OffPolicyAlgorithm):
         loss.backward()
         # Gradient clipping is standard for DQN and helps stability
         torch.nn.utils.clip_grad_norm_(self.agent.parameters(), max_norm=10.0)
-        encoder_grad_norm = torch.stack([
-            layer.weight.grad.detach().norm()
-            for layer in (self.agent.network.conv1, self.agent.network.conv2, self.agent.network.conv3)
-            if layer.weight.grad is not None
-        ]) if self.agent.network.conv1.weight.grad is not None else torch.zeros(1, device=self.device)
+        collect_metrics = getattr(self, '_collect_update_metrics', True)
+        if collect_metrics:
+            encoder_grad_norm = torch.stack([
+                layer.weight.grad.detach().norm()
+                for layer in (self.agent.network.conv1, self.agent.network.conv2, self.agent.network.conv3)
+                if hasattr(layer, "weight") and layer.weight.grad is not None
+            ]) if self.agent.network.conv1.weight.grad is not None else torch.zeros(1, device=self.device)
         self.optimizer.step()
 
         # ------------------------------------------------------------------
@@ -183,13 +194,16 @@ class DQN(OffPolicyAlgorithm):
         # ------------------------------------------------------------------
         # 7. Build result object for logging
         # ------------------------------------------------------------------
+        # Scalar extraction from MPS/CUDA tensors forces device synchronization.
+        # Skip it on non-logging updates; training behavior is unaffected.
         result = Result("")
-        result.add_metric("network/loss", loss.item())
-        result.add_metric("td_error", td_error.mean().item())
-        result.add_metric("td_error_abs", td_error.abs().mean().item())
-        result.add_metric("network/encoder_gradient_norm", encoder_grad_norm.norm().item())
-        result.add_metric("q_value_mean", q.mean().item())
-        result.add_metric("target_mean", target.mean().item())
+        if collect_metrics:
+            result.add_metric("network/loss", loss.item())
+            result.add_metric("td_error", td_error.mean().item())
+            result.add_metric("td_error_abs", td_error.abs().mean().item())
+            result.add_metric("network/encoder_gradient_norm", encoder_grad_norm.norm().item())
+            result.add_metric("q_value_mean", q.mean().item())
+            result.add_metric("target_mean", target.mean().item())
 
         return result
 

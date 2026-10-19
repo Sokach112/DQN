@@ -69,8 +69,8 @@ def main(cfg: DictConfig):
         buffer = BUFFER_DICT[args.algorithm.buffer_name](training_envs.observation_space, training_envs.action_space, args.algorithm.buffer_size, training_envs.num_envs)
 
         logging.info("Creating the Agent...")
-        agent = AtariDQNAgent(training_envs.observation_space, training_envs.action_space, device, activation=args.algorithm.get("activation", "relu"))
-        target_agent = AtariDQNAgent(training_envs.observation_space, training_envs.action_space, device, activation=args.algorithm.get("activation", "relu")) if args.algorithm.use_target else None
+        agent = AtariDQNAgent(training_envs.observation_space, training_envs.action_space, device, activation=args.algorithm.get("activation", "relu"), architecture=args.algorithm.get("architecture", "nature2015"))
+        target_agent = AtariDQNAgent(training_envs.observation_space, training_envs.action_space, device, activation=args.algorithm.get("activation", "relu"), architecture=args.algorithm.get("architecture", "nature2015")) if args.algorithm.use_target else None
 
 
         # create trainer

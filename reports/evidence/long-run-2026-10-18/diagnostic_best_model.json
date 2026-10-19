@@ -1,0 +1,124 @@
+{
+  "checkpoint": "outputs/assignment-2026-10-18-long/pong-tuned-s0/best_model.pth",
+  "checkpoint_sha256": "0d3cfa4c04ab2b3e3640c27a0c525a75743a06ad6316f7541d9996781ef86f17",
+  "environment": "PongNoFrameskip-v4",
+  "seed": 0,
+  "device": "mps",
+  "steps_per_policy": 200,
+  "action_meanings": [
+    [
+      "NOOP",
+      "FIRE",
+      "RIGHT",
+      "LEFT",
+      "RIGHTFIRE",
+      "LEFTFIRE"
+    ]
+  ],
+  "source_sha256": {
+    "agent/atari_agent.py": "8adbdb6ce0cbf11529a61d09b74bc74c58d89374f3fef846830bf8427b5d0e40",
+    "env/make_envs.py": "f91552c946fbbd289dca3a6de7685daf04b8d91f2b892e27ae9cd496beae6365",
+    "algorithm/offpolicy_algorithm/dqn.py": "66b2d2474f50e91cfef3c86e305e29cb41058f4a62818c451842c84727faad34"
+  },
+  "random": {
+    "completed_episode_scores": [],
+    "action_fractions": [
+      0.205,
+      0.145,
+      0.15,
+      0.215,
+      0.14,
+      0.145
+    ],
+    "observation_dtype": "uint8",
+    "observation_range": [
+      52.0,
+      236.0
+    ],
+    "mean_changed_pixel_fraction": 0.008012861394557824,
+    "mean_adjacent_frame_difference_fraction": 0.007999811035525321,
+    "mean_q_by_action": [
+      0.35178719317540524,
+      0.35871349383145573,
+      0.3334451213851571,
+      0.3692582424124703,
+      0.3182005397963803,
+      0.31525286616757514
+    ],
+    "std_q_by_action": [
+      0.28843709390650774,
+      0.28673223194244396,
+      0.29156933179426964,
+      0.3061740715743534,
+      0.3169727780359985,
+      0.3381062822677807
+    ],
+    "mean_top_two_q_gap": 0.03722427409142256
+  },
+  "visual_path": {
+    "sample_count": 128,
+    "activation": "relu",
+    "layers": {
+      "conv1": {
+        "zero_fraction": 0.581134021282196,
+        "mean_std_across_states": 0.012675618752837181
+      },
+      "conv2": {
+        "zero_fraction": 0.7778651714324951,
+        "mean_std_across_states": 0.02290090173482895
+      },
+      "fc1": {
+        "zero_fraction": 0.795654296875,
+        "mean_std_across_states": 0.042275428771972656
+      }
+    },
+    "q_std_by_action": [
+      0.20054423809051514,
+      0.19840003550052643,
+      0.20156437158584595,
+      0.20114246010780334,
+      0.23976974189281464,
+      0.23294362425804138
+    ],
+    "gradient_norm_by_layer": {
+      "conv1": 1.6598567962646484,
+      "conv2": 2.1634039878845215,
+      "fc1": 0.8185915350914001
+    }
+  },
+  "greedy": {
+    "completed_episode_scores": [],
+    "action_fractions": [
+      0.105,
+      0.245,
+      0.16,
+      0.19,
+      0.115,
+      0.185
+    ],
+    "observation_dtype": "uint8",
+    "observation_range": [
+      52.0,
+      236.0
+    ],
+    "mean_changed_pixel_fraction": 0.00752639597505669,
+    "mean_adjacent_frame_difference_fraction": 0.00750165343915344,
+    "mean_q_by_action": [
+      0.38510370045900344,
+      0.3922313780337572,
+      0.36900840912014243,
+      0.39278985404409467,
+      0.3597653314098716,
+      0.36003798350691796
+    ],
+    "std_q_by_action": [
+      0.15389525097153584,
+      0.15988047210611514,
+      0.19522987146191917,
+      0.17084386872721485,
+      0.18733490107703857,
+      0.19888910633844697
+    ],
+    "mean_top_two_q_gap": 0.04043505556881428
+  }
+}

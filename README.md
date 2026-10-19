@@ -1,47 +1,51 @@
-# README
+# DQN on Atari — from scratch
 
-## Environment Configuratiom
+A from-scratch implementation of Deep Q-Networks (DQN) in PyTorch, applied to
+Atari Pong and Breakout. The headline result is a paper-scale Pong run that
+reaches the DQN paper's score: **21.0 greedy evaluation at ten checkpoints** and
+a saved policy that wins **100/100 fresh-seed games 21–0**.
 
-1. **Python Version**  
-   This project uses **Python 3.10**.
+Full results and analysis: [`REPORT.md`](REPORT.md) ·
+Requirement checklist: [`ASSIGNMENT_STATUS.md`](ASSIGNMENT_STATUS.md).
 
-2. **Install PyTorch**  
-   Select installation commands according to your device:
-   
-   - **With GPU（CUDA）**：
-     ```bash
-     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-     ```
-     > Replace`cu118` with the CUDA version that matches your GPU.
+![Pong learning curve](reports/figures/pong21_learning_curve.png)
 
-   - **CPU-only**：
-     ```bash
-     pip install torch torchvision torchaudio
-     ```
+## Repository layout
 
+```text
+main.py                 Hydra training entry point
+config/config.yaml      network, algorithm, environment and logging defaults
+agent/                  Q-network agent, action selection, checkpoints
+algorithm/              DQN update, target networks, exploration schedule
+env/                    Atari wrappers and vector-environment factory
+memory/                 circular experience replay
+logger/, utils/         logging, evaluation, result and network utilities
+tests/                  26 ROM-free regression tests
+scripts/                pilot/long-run/analysis/verification drivers
+kaggle/                 paper-scale run notebooks (Pong strict baseline, Breakout)
+reports/                detailed reports, figures, raw CSV/JSON evidence
+outputs/                local raw training runs (gitignored)
+```
 
-3. **Dependencies Installation**  
+## Setup
 
-   ```bash
-   pip install -r requirements.txt
-   ``` 
+The project uses Python 3.10+ (the provided `.venv` uses 3.12).
 
-## Running training
+```bash
+pip install -r requirements.txt
+```
 
-Run from the project root after installing PyTorch and `requirements.txt`:
+Atari ROMs must be available to ALE (for example `AutoROM --accept-license`).
+The default game is `PongNoFrameskip-v4`; supported game IDs are listed in
+`env/make_envs.py`. Device selection prefers CUDA, then Apple MPS, then CPU.
+
+## Training
 
 ```bash
 python main.py
 ```
 
-The Atari ROMs must be available to ALE. The default game is
-`PongNoFrameskip-v4`; supported game IDs are listed in `env/make_envs.py`.
-The environment factory uses Stable-Baselines3 vector environments (not
-Gymnasium's vector API). Training uses clipped rewards and life-loss endings;
-evaluation uses complete games and original rewards. FIRE resets start games
-that require them.
-
-A short run that exercises collection, learning, and checkpoint writing:
+A short run that exercises collection, learning and checkpoint writing:
 
 ```bash
 python main.py total_epoch=3 interact_per_epoch=2 algorithm.buffer_size=16 \
@@ -49,70 +53,32 @@ python main.py total_epoch=3 interact_per_epoch=2 algorithm.buffer_size=16 \
   train_log_interval=2 use_tensorboard=false
 ```
 
-`seed` seeds the libraries and environments; each vector member receives a
-separate seed. Exact reproducibility still depends on device and dependencies.
-CUDA is preferred, followed by Apple MPS and CPU.
+Useful overrides:
 
-## Configuration and counters
+- `total_epoch` / `interact_per_epoch`: number of collect/update cycles and
+  vector steps per cycle. `interaction_step` (transitions) drives logging,
+  evaluation, saving and ε decay.
+- `algorithm.learning_starts`, `algorithm.epsilon_timestep`,
+  `algorithm.end_epsilon`: warmup and ε schedule.
+- `algorithm.double_dqn` (default `false`): vanilla target-network DQN baseline;
+  Double DQN is opt-in. `use_target=false` removes the target network entirely.
+- `algorithm.architecture` (`paper2013` default, 16/32 conv + 256 hidden;
+  `nature2015` 32/64/64 + 512), `activation` (`relu`/`leaky_relu`),
+  `loss` (`mse`/`huber`), `optimizer`.
+- `algorithm.action_selection` (`epsilon_greedy` default or `softmax`) and
+  `algorithm.softmax_temperature`.
+- `test_interval`, `test_episodes`, `save_interval`, `train_log_interval`;
+  zero disables periodic triggering. A final checkpoint is always saved.
+- `+save_pth=/path/model.pth` redirects the checkpoint (directory or filename).
 
-- `total_epoch`: number of collect/update cycles. Each cycle gathers
-  `interact_per_epoch` vector steps and performs at most one gradient update.
-- `interaction_step`: individual transitions across all training environments.
-  Logging, evaluation, saving, warmup, and epsilon use this counter. An interval
-  triggers when crossed, even when a batch skips its exact multiple. Set logging,
-  evaluation, or saving intervals to zero to disable their periodic trigger.
-  Evaluation first runs after its interval; a final checkpoint is always saved.
-- `algorithm.learning_starts`: minimum transitions before training. Replay must
-  also contain at least `batch_size` transitions.
-- `algorithm.epsilon_schedule`: `linear` or `constant`. Linear interpolation runs
-  from `start_epsilon` to `end_epsilon` over `epsilon_timestep` transitions.
-  The old `epsilon_schedular` key is accepted when the new key is absent.
-  `train_action_deterministic=true` explicitly disables exploration.
-- `use_target=true`: Double DQN, with online action selection and target-network
-  evaluation. Without a target, ordinary max-Q bootstrapping uses the online net.
-- `target_update_interval`: completed gradient updates between hard copies.
-  Soft updates run after every gradient update with `target_update_tau`.
+Checkpoints store weights, spaces, architecture and activation. They do **not**
+store replay, optimizer or RNG state, so training cannot be resumed exactly;
+reproducibility depends on device and dependencies. `agent.load(path)` loads a
+trusted checkpoint.
 
-Replay capacity counts transitions, rounded down to whole vector steps. Explicit
-current and next observations preserve terminal states across automatic resets.
-At `(4, 84, 84)` uint8, the default 10,000 transitions require approximately
-565 MB just for observations; one million would require about 56.5 GB. Increase
-capacity deliberately for longer experiments. This implementation prioritizes
-correctness and clarity over frame-deduplicated storage.
-
-## Code map and data contracts
-
-| File | Responsibility |
-| --- | --- |
-| `main.py` | Hydra configuration, component assembly, and resource cleanup |
-| `config/config.yaml` | Training, environment, logging, and exploration defaults |
-| `env/make_envs.py` | Atari preprocessing, frame stacking, monitoring, seeded vector factories |
-| `agent/atari_agent.py` | Pixel normalization, batched actions, Q-values, checkpoints |
-| `utils/networks.py` | Convolutional network taking normalized channel-first images |
-| `algorithm/offpolicy_algorithm/baseoffpolicy.py` | Collection, counters, schedules, training lifecycle |
-| `algorithm/offpolicy_algorithm/dqn.py` | Huber TD loss, gradient clipping, Double DQN targets |
-| `memory/memory.py` | Circular replay with uniform sampling |
-| `utils/evaluate.py` | Exact episode-count evaluation and cleanup |
-| `logger/logger.py`, `utils/result.py` | Console/backend logging, scalar metrics, timing |
-| `tests/test_regressions.py` | ROM-independent regression suite |
-
-Collection batches are dictionaries with leading `(time, environments)` axes.
-Actions can be `(time, environments)` or include a final singleton axis.
-Sampling returns a dictionary whose leading axis is minibatch size; reward and
-terminal vectors are reshaped to columns before TD loss calculation, avoiding
-accidental broadcasting. `dones` masks true termination/life loss; time-limit
-truncations bootstrap from `info['terminal_observation']`, never the next game's
-reset observation.
-
-Agents accept uint8 images or already-normalized float images. Byte inputs are
-normalized exactly once by the agent; direct network calls expect floats in
-`[0, 1]`. Evaluation restores the previous agent mode and closes its environments
-on success or failure. Optional logging packages are imported only when enabled.
-
-`newest_model.pth` contains model weights and space metadata. `agent.load(path)`
-loads a trusted checkpoint onto the agent's current device. These checkpoints do
-not include replay, optimizer state, counters, or RNG state, so they are not full
-training-resume snapshots.
+Replay stores explicit current/next observations (including terminal
+observations), so memory is the binding constraint for long runs: about 56.4 KB
+per transition for 4×84×84 uint8 observations (100k ≈ 5.65 GB, 250k ≈ 14.1 GB).
 
 ## Tests
 
@@ -120,125 +86,83 @@ training-resume snapshots.
 python -m unittest discover -s tests -v
 ```
 
-Tests use synthetic image environments and do not require ROMs, GPU access, or
-online logging accounts. They cover replay overflow and successors, vector
-collection, truncation masks, TD updates, target-copy timing, normalization,
-exploration shape, checkpoint loading, evaluation cleanup, metrics, and wrappers.
+26 ROM-free tests cover replay overflow/successors, vector collection,
+truncation masks, TD targets (vanilla and Double DQN), MSE update, target-copy
+timing, normalization, checkpoint loading, evaluation cleanup, softmax
+distributions, metrics and wrappers.
 
-## Diagnosing flat Atari scores
+## Experiments and analysis
 
-A low TD loss and increasing update count do not establish policy improvement.
-Before another long run, inspect an existing trusted checkpoint:
+All drivers live in `scripts/` and are run from the repository root.
 
-```bash
-python diagnose.py --checkpoint /path/to/newest_model.pth --steps 2000 \
-  --device auto --output diagnostic_report.json
-```
+| Script | Purpose |
+| --- | --- |
+| `assignment_experiments.py` | four 20k-decision pilots (baseline, learning rate, ε decay, Breakout) |
+| `long_experiments.py` | crash-safe long runs with incremental JSON, checkpoints, early stopping and final fresh-seed evaluation |
+| `run_multiseed_batch.sh` | three tuning variants concurrently for one seed |
+| `multiseed_analysis.py` | aggregate multi-seed runs into CSV/Markdown/PNG |
+| `long_analysis.py` | plot a report, summarize throughput and memory projections |
+| `kaggle_results_analysis.py` | parse a training log and independently evaluate a checkpoint on fresh seeds |
+| `verify_long_run.py` | re-evaluate saved checkpoints on fresh reset seeds |
+| `diagnose.py` | action frequencies, Q variability, activation sparsity and gradient probe |
+| `checkpoint_sensitivity.py` | regional-occlusion / frame-order sensitivity report |
+| `evaluate_assignment_results.py`, `plot_assignment_results.py` | pilot checkpoint evaluation and figures |
+| `compare_dqn.py`, `compare_wrappers.py` | numerical learner parity against Stable-Baselines3 and wrapper comparison |
 
-This runs bounded random and greedy rollouts without training. The JSON records
-completed game scores, action frequencies, observation range/dtype, frame changes,
-Q-value variability, and the gap between the two highest Q-values. It also records
-source/checkpoint hashes for identifying the code and model being inspected. Omit
-`--checkpoint` for an untrained control. The environment comes from the local
-`config/config.yaml`; it must match the checkpoint's game. A rollout may finish
-before an episode, producing an empty score list; that is not a zero score.
-
-One dominant action may explain poor play but does not establish the cause.
-Changing images and finite Q-values likewise do not establish successful learning.
-`tests/test_learning.py` checks exact Double DQN targets and basic visual learning;
-it is explicitly not a Pong convergence benchmark.
-
-### Checkpoint destination in Colab
-
-The optional Hydra override `+save_pth=/content/drive/MyDrive/dqn_checkpoints/`
-now selects a checkpoint directory; `newest_model.pth` is appended. An explicit
-filename such as `+save_pth=/content/drive/MyDrive/dqn_checkpoints/pong.pth` is
-also accepted. The resolved destination is printed at startup. Without this
-override, checkpoints remain under `log_dir`.
-
-Earlier versions silently ignored the added `save_pth` field. For those runs,
-look for `outputs/**/newest_model.pth` under the Colab project directory before
-ending the runtime. With the default save interval, the first periodic save is
-at 500,000 transitions, and a final save occurs on successful training completion.
-Loading weights is separate: passing `save_pth` never resumes a training run.
-
-### Visual-feature collapse and activation choice
-
-A failed Pong checkpoint inspected on 2026-10-12 chose action 3 on every one of
-5,000 greedy steps. Its third convolution's ReLU output was all zeros across
-128 sampled game observations. Backpropagation on those observations produced
-zero gradients in all three convolutional weight tensors. Thus the downstream
-layers could fit constant values without responding to the ball or paddle.
-This identifies the checkpoint's failure mechanism, not when or why it began.
-
-New training runs now default to `algorithm.activation=leaky_relu` (negative slope
-0.01); `algorithm.activation=relu` remains available for controlled comparisons.
-LeakyReLU retains a nonzero derivative for negative inputs. On the failed weights,
-a local activation-only probe restored nonzero gradients to all three convolutions.
-That is a gradient-flow safeguard, not a validated Pong performance improvement.
-
-Activation choice is saved in checkpoint metadata. Legacy checkpoints without
-this field load with ReLU, preserving their original policy even when the current
-training default is LeakyReLU. Loading does not silently repair or convert them.
-Training also logs `network/encoder_gradient_norm` (after gradient clipping) and
-`td_error_abs`. A persistently zero encoder gradient warrants an activation audit.
-The checkpoint diagnostic now includes per-layer activation sparsity, variation
-across game observations, and a gradient probe that does not update model weights.
-
-## Controlled learner comparison
-
-`compare_dqn.py` isolates the custom update from collection/preprocessing:
+Example long run:
 
 ```bash
-python compare_dqn.py --mode parity
-python compare_dqn.py --mode train --backend both --steps 25000 --episodes 3
-python compare_dqn.py --mode native --steps 25000 --episodes 3
+python scripts/long_experiments.py --tag pong-long --game PongNoFrameskip-v4 \
+  --steps 1500000 --device mps --buffer-size 100000 \
+  --epsilon-timestep 100000 --end-epsilon 0.01 \
+  --target-update-interval 1000 --test-interval 50000
 ```
 
-All commands default to CPU, one PyTorch thread, seed 0, 50,000 replay transitions,
-LeakyReLU, and the same initial weights. Outputs go to `outputs/comparison`.
-Use a different `--output` directory to retain independent experiments. Existing
-reports/checkpoints in the chosen directory are replaced. Atari ROMs are required.
+## Results
 
-- **Parity:** identical real minibatches through the production custom update and
-  the installed SB3 `DQN.train`; compare predictions, losses, and weights over
-  50 updates, including five target copies.
-- **Train:** independent rollouts with a shared collector and replay contract.
-  This intentionally isolates learner differences; it cannot independently test
-  the project's collection/replay implementation.
-- **Native:** SB3's own collector and replay on the project's environment wrappers.
-  The network/initial weights/Adam options are matched. SB3 retains uniform random
-  warmup, begins updating at 10,004 rather than 10,000 transitions, and copies its
-  target at environment-step boundaries. These small differences are recorded in
-  the report; this control is not claimed to be numerically identical.
+| Experiment | Budget | Outcome |
+| --- | --- | --- |
+| Short pilots (seed 0) | 20k decisions | all near random play; too noisy to rank |
+| Multi-seed tuning | 3 variants × 3 seeds × 200k decisions | pilot ranking does not survive seed spread |
+| Local long run | 1.25M decisions (5M frames) | −21 → best fresh-seed 20-game mean +4.3; below 21 |
+| **Paper-scale Kaggle run** | **2.5M decisions (10M frames), 1 update/decision** | **21.0 at ten checkpoints; 100/100 fresh games 21–0** |
 
-The comparison uses **vanilla target-network DQN** for both implementations,
-selected by the new `algorithm.double_dqn=false` option. The normal training
-configuration keeps `double_dqn=true`. Setting `use_target=false` is not an
-appropriate substitute: that removes the target network entirely.
+The paper-scale run used replay 200k, ε 1→0.1 over 250k decisions, target copy
+every 1000 updates, Adam 1e-4, batch 32, and an 8 h 19 m Tesla T4 session. See
+[`reports/03_pong21_2026-10-19.md`](reports/03_pong21_2026-10-19.md) for the
+protocol, curve, verification and artifacts.
 
-The budget controls total transitions, not epochs. Warmup is 10,000 transitions,
-epsilon decays from 1 to .1 over 400,000 transitions, and training uses one update
-per four transitions. Final evaluation uses separately seeded complete games and
-preserves the training NumPy/Torch CPU RNG states. Three evaluation games and a
-single seed are a bounded diagnostic, not a convergence or reliability benchmark.
-SB3-native checkpoints retain their usual `.zip` format; shared-run custom
-checkpoints use `.pth`.
+## Reports and evidence
 
-Audit a trusted checkpoint's image sensitivity without training:
+| File | Contents |
+| --- | --- |
+| [`REPORT.md`](REPORT.md) | consolidated final report |
+| [`reports/01_pilot_2026-10-18.md`](reports/01_pilot_2026-10-18.md) | 20k pilot design and initial reflection |
+| [`reports/02_long_run_2026-10-18.md`](reports/02_long_run_2026-10-18.md) | long run, replay/update budget analysis, completion plan |
+| [`reports/03_pong21_2026-10-19.md`](reports/03_pong21_2026-10-19.md) | paper-scale Pong 21 result and independent verification |
+| [`reports/04_multiseed_2026-10-18.md`](reports/04_multiseed_2026-10-18.md) | 3×3 multi-seed tuning study |
+| `reports/figures/`, `reports/data/`, `reports/verification/` | figures, raw CSVs and verification JSON |
+| `reports/evidence/` | training logs, Kaggle notebook, per-run reports, solved checkpoint |
 
-```bash
-python checkpoint_sensitivity.py --checkpoint /path/to/newest_model.pth
-```
+## Kaggle runbooks
 
-This saves a 256-image regional-occlusion/frame-order report and a sample frame
-stack. Regional removal creates synthetic inputs; a changed action does not
-establish correct tracking, and unchanged actions do not prove the region is
-ignored. The reported centered Q-values remove the per-state mean to distinguish
-changes in overall predictions from changes in relative action preferences.
+- [`kaggle/pong_baseline_paper2013.ipynb`](kaggle/pong_baseline_paper2013.ipynb) —
+  strict assignment baseline (paper2013/ReLU/MSE/vanilla) at the 2.5M-decision
+  paper scale; this closes the configuration-compliance caveat.
+- [`kaggle/breakout_paper2013.ipynb`](kaggle/breakout_paper2013.ipynb) —
+  paper-scale Breakout (reference: 168 average / 225 best).
 
-`python compare_wrappers.py` independently compares 2,000 identical actions with
-stock SB3 AtariWrapper/VecTransposeImage/VecFrameStack. Its report excludes reset
-padding and does not exercise the project's 5,000-decision time-limit boundary.
-This verifies normal rollout preprocessing without claiming equivalence for all
-termination cases.
+Both clone the GitHub repository, assert the current defaults, run the training,
+verify the checkpoint and package artifacts. Push the current working tree
+before running them.
+
+## Caveats
+
+- The 21.0 run was produced from the pre-baseline commit and therefore used
+  `nature2015` + LeakyReLU + Huber + Double DQN. The repository now implements
+  and defaults to the strict assignment baseline (paper2013 + ReLU + MSE +
+  vanilla target DQN); a strict-baseline rerun notebook is provided but not yet
+  executed. Do not attribute 21 to the strict baseline without that run.
+- Paper-level Breakout has not been run at paper scale.
+- The paper's full schedule (ten seeds per game) is a multi-day workload on this
+  hardware; the measured budget analysis is in `reports/02_long_run_2026-10-18.md`.
